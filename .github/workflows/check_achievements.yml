@@ -40,7 +40,7 @@ jobs:
                 user=os.environ['DB_USER'],
                 password=os.environ['DB_PASS'],
                 database=os.environ['DB_NAME'],
-                port=3307,
+                port=3306,
                 cursorclass=pymysql.cursors.DictCursor
             )
         except Exception as e:
