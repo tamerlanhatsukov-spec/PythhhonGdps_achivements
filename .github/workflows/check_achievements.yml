@@ -2,8 +2,8 @@ name: GDPS Achievements Scanner
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Скрипт будет запускаться сам каждые 5 минут
-  workflow_dispatch: # Позволяет запускать вручную кнопкой
+    - cron: '*/5 * * * *' # Запуск каждые 5 минут
+  workflow_dispatch: # Кнопка ручного запуска
 
 jobs:
   scan:
@@ -15,7 +15,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-node: '3.10'
+        python-version: '3.10'
 
     - name: Install Dependencies
       run: pip install pymysql requests
@@ -34,7 +34,6 @@ jobs:
         import requests
         import json
 
-        # Подключение к БД FHGDPS
         try:
             db = pymysql.connect(
                 host=os.environ['DB_HOST'],
@@ -49,11 +48,9 @@ jobs:
             exit(1)
 
         with db.cursor() as cursor:
-            # 1. Загружаем кастомные ачивки из твоей таблицы
             cursor.execute("SELECT id, name, description, type, count FROM achievements")
             achievements = cursor.fetchall()
 
-            # 2. Получаем всех игроков
             cursor.execute("SELECT userID, userName, creatorPoints FROM users")
             users = cursor.fetchall()
 
@@ -62,13 +59,11 @@ jobs:
                 u_name = user['userName']
                 u_cp = user['creatorPoints']
 
-                # Считаем лайки и скачивания для этого игрока
                 cursor.execute("SELECT IFNULL(SUM(likes), 0) as total_likes, IFNULL(SUM(downloads), 0) as total_downloads FROM levels WHERE userID = %s", (u_id,))
                 stats = cursor.fetchone()
                 u_likes = stats['total_likes']
                 u_downloads = stats['total_downloads']
 
-                # Проверяем каждое достижение
                 for ach in achievements:
                     ach_id = ach['id']
                     ach_name = ach['name']
@@ -76,7 +71,6 @@ jobs:
                     ach_type = ach['type']
                     ach_count = ach['count']
 
-                    # Условие выдачи
                     condition_met = False
                     if ach_type == 'cp' and u_cp >= ach_count:
                         condition_met = True
@@ -86,12 +80,10 @@ jobs:
                         condition_met = True
 
                     if condition_met:
-                        # Проверяем, не выдавали ли уже (actionType = 99)
                         cursor.execute("SELECT COUNT(*) as cnt FROM actions WHERE userID = %s AND actionType = 99 AND value1 = %s", (u_id, ach_id))
                         if cursor.fetchone()['cnt'] == 0:
                             
-                            # Отправляем красивый эмбед в Дискорд
-                            color_map = {'cp': 3447003, 'likes': 15844367, 'downloads': 1752220} # Синий, Желтый, Зеленый
+                            color_map = {'cp': 3447003, 'likes': 15844367, 'downloads': 1752220}
                             payload = {
                                 "username": "FHGDPS Достижения",
                                 "embeds": [{
@@ -103,7 +95,6 @@ jobs:
                             
                             response = requests.post(os.environ['DISCORD_URL'], json=payload)
                             if response.status_code in:
-                                # Записываем в логи БД, чтобы больше не спамить этой ачивкой
                                 cursor.execute("INSERT INTO actions (userID, actionType, value1, timestamp) VALUES (%s, 99, %s, UNIX_TIMESTAMP())", (u_id, ach_id))
                                 db.commit()
                                 print(f"Достижение '{ach_name}' выдано игроку {u_name}")
