@@ -1,0 +1,111 @@
+name: GDPS Achievements Scanner
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # Скрипт будет запускаться сам каждые 5 минут
+  workflow_dispatch: # Позволяет запускать вручную кнопкой
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-node: '3.10'
+
+    - name: Install Dependencies
+      run: pip install pymysql requests
+
+    - name: Run Script
+      env:
+        DB_HOST: '148.251.91.145'
+        DB_USER: 'gdps_pythhhongd'
+        DB_NAME: 'gdps_pythhhongd'
+        DB_PASS: \${{ secrets.DB_PASSWORD }}
+        DISCORD_URL: \${{ secrets.DISCORD_WEBHOOK }}
+      run: |
+        python - << 'EOF'
+        import os
+        import pymysql
+        import requests
+        import json
+
+        # Подключение к БД FHGDPS
+        try:
+            db = pymysql.connect(
+                host=os.environ['DB_HOST'],
+                user=os.environ['DB_USER'],
+                password=os.environ['DB_PASS'],
+                database=os.environ['DB_NAME'],
+                port=3307,
+                cursorclass=pymysql.cursors.DictCursor
+            )
+        except Exception as e:
+            print(f"Ошибка подключения к БД: {e}")
+            exit(1)
+
+        with db.cursor() as cursor:
+            # 1. Загружаем кастомные ачивки из твоей таблицы
+            cursor.execute("SELECT id, name, description, type, count FROM achievements")
+            achievements = cursor.fetchall()
+
+            # 2. Получаем всех игроков
+            cursor.execute("SELECT userID, userName, creatorPoints FROM users")
+            users = cursor.fetchall()
+
+            for user in users:
+                u_id = user['userID']
+                u_name = user['userName']
+                u_cp = user['creatorPoints']
+
+                # Считаем лайки и скачивания для этого игрока
+                cursor.execute("SELECT IFNULL(SUM(likes), 0) as total_likes, IFNULL(SUM(downloads), 0) as total_downloads FROM levels WHERE userID = %s", (u_id,))
+                stats = cursor.fetchone()
+                u_likes = stats['total_likes']
+                u_downloads = stats['total_downloads']
+
+                # Проверяем каждое достижение
+                for ach in achievements:
+                    ach_id = ach['id']
+                    ach_name = ach['name']
+                    ach_desc = ach['description']
+                    ach_type = ach['type']
+                    ach_count = ach['count']
+
+                    # Условие выдачи
+                    condition_met = False
+                    if ach_type == 'cp' and u_cp >= ach_count:
+                        condition_met = True
+                    elif ach_type == 'likes' and u_likes >= ach_count:
+                        condition_met = True
+                    elif ach_type == 'downloads' and u_downloads >= ach_count:
+                        condition_met = True
+
+                    if condition_met:
+                        # Проверяем, не выдавали ли уже (actionType = 99)
+                        cursor.execute("SELECT COUNT(*) as cnt FROM actions WHERE userID = %s AND actionType = 99 AND value1 = %s", (u_id, ach_id))
+                        if cursor.fetchone()['cnt'] == 0:
+                            
+                            # Отправляем красивый эмбед в Дискорд
+                            color_map = {'cp': 3447003, 'likes': 15844367, 'downloads': 1752220} # Синий, Желтый, Зеленый
+                            payload = {
+                                "username": "FHGDPS Достижения",
+                                "embeds": [{
+                                    "title": "🏆 ПОЛУЧЕНО НОВОЕ ДОСТИЖЕНИЕ!",
+                                    "description": f"👤 **Игрок:** `{u_name}`\n✨ **Награда:** **{ach_name}**\n📝 **Условие:** *{ach_desc}*",
+                                    "color": color_map.get(ach_type, 3447003)
+                                }]
+                            }
+                            
+                            response = requests.post(os.environ['DISCORD_URL'], json=payload)
+                            if response.status_code in:
+                                # Записываем в логи БД, чтобы больше не спамить этой ачивкой
+                                cursor.execute("INSERT INTO actions (userID, actionType, value1, timestamp) VALUES (%s, 99, %s, UNIX_TIMESTAMP())", (u_id, ach_id))
+                                db.commit()
+                                print(f"Достижение '{ach_name}' выдано игроку {u_name}")
+        db.close()
+        EOF
