@@ -94,7 +94,7 @@ jobs:
                             }
                             
                             response = requests.post(os.environ['DISCORD_URL'], json=payload)
-                            if response.status_code in:
+                            if response.status_code:
                                 cursor.execute("INSERT INTO actions (userID, actionType, value1, timestamp) VALUES (%s, 99, %s, UNIX_TIMESTAMP())", (u_id, ach_id))
                                 db.commit()
                                 print(f"Достижение '{ach_name}' выдано игроку {u_name}")
